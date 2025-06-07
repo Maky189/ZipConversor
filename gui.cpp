@@ -1,0 +1,282 @@
+#include <gtkmm.h>
+#include <iostream>
+#include <string>
+#include <filesystem>
+#include <fstream>
+#include <vector>
+#include <zip.h>
+
+class ZipConversorWindow : public Gtk::Window {
+public:
+    ZipConversorWindow();
+
+protected:
+    void on_button_select_file_clicked();
+    void on_button_convert_clicked();
+    void on_button_quit_clicked();
+
+    Gtk::Box m_vbox;
+    Gtk::Box m_hbox_buttons;
+    Gtk::Label m_label_selected_file;
+    Gtk::Button m_button_select_file;
+    Gtk::Button m_button_convert;
+    Gtk::Button m_button_quit;
+    Gtk::ProgressBar m_progress_bar;
+    Gtk::TextView m_text_view_log;
+    Gtk::ScrolledWindow m_scrolled_window;
+
+    std::string m_selected_file_path;
+    std::string uncodePath(const std::string& path);
+    bool convertToZip(const std::string& file_path);
+    void log_message(const std::string& message);
+};
+
+ZipConversorWindow::ZipConversorWindow()
+    : m_vbox(Gtk::ORIENTATION_VERTICAL, 10),
+      m_hbox_buttons(Gtk::ORIENTATION_HORIZONTAL, 5),
+      m_label_selected_file("Nenhum arquivo selecionado"),
+      m_button_select_file("Selecionar Arquivo"),
+      m_button_convert("Converter para ZIP"),
+      m_button_quit("Sair")
+{
+    set_title("ZipConversor - Conversor de Arquivos para ZIP");
+    set_default_size(600, 400);
+    set_border_width(10);
+
+    m_button_convert.set_sensitive(false);
+    m_progress_bar.set_show_text(true);
+    m_progress_bar.set_text("Pronto");
+
+    m_text_view_log.set_editable(false);
+    m_scrolled_window.add(m_text_view_log);
+    m_scrolled_window.set_policy(Gtk::POLICY_AUTOMATIC, Gtk::POLICY_AUTOMATIC);
+    m_scrolled_window.set_size_request(-1, 150);
+
+    m_vbox.pack_start(m_label_selected_file, Gtk::PACK_SHRINK);
+    m_vbox.pack_start(m_button_select_file, Gtk::PACK_SHRINK);
+
+    m_hbox_buttons.pack_start(m_button_convert, Gtk::PACK_EXPAND_WIDGET);
+    m_hbox_buttons.pack_start(m_button_quit, Gtk::PACK_SHRINK);
+    m_vbox.pack_start(m_hbox_buttons, Gtk::PACK_SHRINK);
+
+    m_vbox.pack_start(m_progress_bar, Gtk::PACK_SHRINK);
+    m_vbox.pack_start(m_scrolled_window, Gtk::PACK_EXPAND_WIDGET);
+
+    add(m_vbox);
+
+    m_button_select_file.signal_clicked().connect(
+        sigc::mem_fun(*this, &ZipConversorWindow::on_button_select_file_clicked));
+    m_button_convert.signal_clicked().connect(
+        sigc::mem_fun(*this, &ZipConversorWindow::on_button_convert_clicked));
+    m_button_quit.signal_clicked().connect(
+        sigc::mem_fun(*this, &ZipConversorWindow::on_button_quit_clicked));
+
+    show_all_children();
+
+    log_message("ZipConversor iniciado. Selecione um arquivo para converter para ZIP.");
+}
+
+void ZipConversorWindow::on_button_select_file_clicked() {
+    Gtk::FileChooserDialog dialog(*this, "Selecione um arquivo para converter para ZIP");
+    dialog.set_transient_for(*this);
+
+    // Add response buttons
+    dialog.add_button("_Cancelar", Gtk::RESPONSE_CANCEL);
+    dialog.add_button("_Abrir", Gtk::RESPONSE_OK);
+
+    // Add filters
+    auto filter_all = Gtk::FileFilter::create();
+    filter_all->set_name("Todos os arquivos");
+    filter_all->add_pattern("*");
+    dialog.add_filter(filter_all);
+
+    auto filter_text = Gtk::FileFilter::create();
+    filter_text->set_name("Arquivos de texto");
+    filter_text->add_mime_type("text/plain");
+    dialog.add_filter(filter_text);
+
+    int result = dialog.run();
+
+    if (result == Gtk::RESPONSE_OK) {
+        m_selected_file_path = dialog.get_filename();
+        std::string display_name = std::filesystem::path(m_selected_file_path).filename().string();
+        m_label_selected_file.set_text("Arquivo selecionado: " + display_name);
+        m_button_convert.set_sensitive(true);
+        log_message("Arquivo selecionado: " + m_selected_file_path);
+    }
+}
+
+void ZipConversorWindow::on_button_convert_clicked() {
+    if (m_selected_file_path.empty()) {
+        log_message("Erro: Nenhum arquivo selecionado!");
+        return;
+    }
+
+    m_button_convert.set_sensitive(false);
+    m_button_select_file.set_sensitive(false);
+    m_progress_bar.set_text("Convertendo...");
+    m_progress_bar.pulse();
+
+    // Updtae dui
+    while (Gtk::Main::events_pending()) {
+        Gtk::Main::iteration();
+    }
+
+    bool success = convertToZip(m_selected_file_path);
+
+    m_button_convert.set_sensitive(true);
+    m_button_select_file.set_sensitive(true);
+
+    if (success) {
+        m_progress_bar.set_text("Conversão concluída com sucesso!");
+        log_message("Conversão concluída com sucesso!");
+    } else {
+        m_progress_bar.set_text("Erro na conversão!");
+        log_message("Erro durante a conversão!");
+    }
+}
+
+void ZipConversorWindow::on_button_quit_clicked() {
+    hide();
+}
+
+std::string ZipConversorWindow::uncodePath(const std::string& path) {
+    if (path.empty()) return path;
+
+    if (path[0] == '~') {
+        const char* home = std::getenv("HOME");
+        if (home) {
+            return std::string(home) + path.substr(1);
+        }
+    }
+
+    return path;
+}
+
+bool ZipConversorWindow::convertToZip(const std::string& file_path) {
+    try {
+        std::string decoded_path = uncodePath(file_path);
+
+        if (!std::filesystem::exists(decoded_path)) {
+            log_message("Erro: Arquivo não encontrado: " + decoded_path);
+            return false;
+        }
+
+        if (!std::filesystem::is_regular_file(decoded_path)) {
+            log_message("Erro: O caminho especificado não é um arquivo: " + decoded_path);
+            return false;
+        }
+
+        std::string internal_filename = std::filesystem::path(decoded_path).filename().string();
+        std::string zip_filename;
+
+        // Take out the filename
+        size_t dot_pos = internal_filename.find_last_of('.');
+        if (dot_pos != std::string::npos) {
+            zip_filename = internal_filename.substr(0, dot_pos);
+        } else {
+            zip_filename = internal_filename;
+        }
+        zip_filename += ".zip";
+
+        std::filesystem::path source_path(decoded_path);
+        std::filesystem::path zip_full_path = source_path.parent_path() / zip_filename;
+
+        log_message("ZIP será criado em: " + zip_full_path.string());
+
+        auto file_size = std::filesystem::file_size(decoded_path);
+        log_message("Tamanho do arquivo: " + std::to_string(file_size) + " bytes");
+
+        // Read file into memory
+        std::ifstream file(decoded_path, std::ios::binary);
+        if (!file) {
+            log_message("Erro: Não foi possível abrir o arquivo: " + decoded_path);
+            return false;
+        }
+
+        std::vector<char> file_content(file_size);
+        file.read(file_content.data(), file_size);
+        file.close();
+
+        if (file.gcount() != static_cast<std::streamsize>(file_size)) {
+            log_message("Erro: Não foi possível ler todo o conteúdo do arquivo.");
+            return false;
+        }
+
+        // Create ZIP
+        int error;
+        zip_t* zip = zip_open(zip_full_path.string().c_str(), ZIP_CREATE | ZIP_TRUNCATE, &error);
+
+        if (!zip) {
+            zip_error_t zip_error;
+            zip_error_init_with_code(&zip_error, error);
+            log_message("Erro: Não foi possível criar o arquivo ZIP: " + std::string(zip_error_strerror(&zip_error)));
+            zip_error_fini(&zip_error);
+            return false;
+        }
+
+        zip_source_t* source = zip_source_buffer(zip, file_content.data(), file_content.size(), 0);
+        if (!source) {
+            log_message("Erro: Não foi possível criar fonte de dados: " + std::string(zip_strerror(zip)));
+            zip_close(zip);
+            return false;
+        }
+
+        zip_int64_t index = zip_file_add(zip, internal_filename.c_str(), source, ZIP_FL_OVERWRITE);
+        if (index < 0) {
+            log_message("Erro: Não foi possível adicionar arquivo ao ZIP: " + std::string(zip_strerror(zip)));
+            zip_source_free(source);
+            zip_close(zip);
+            return false;
+        }
+
+        // Set compression method
+        if (zip_set_file_compression(zip, index, ZIP_CM_DEFLATE, 9) < 0) {
+            log_message("Aviso: Não foi possível definir método de compressão: " + std::string(zip_strerror(zip)));
+        }
+
+        if (zip_close(zip) < 0) {
+            log_message("Erro: Não foi possível fechar o arquivo ZIP: " + std::string(zip_strerror(zip)));
+            return false;
+        }
+
+        log_message("Arquivo ZIP criado com sucesso: " + zip_full_path.string());
+        log_message("Arquivo adicionado: " + internal_filename + " (" + std::to_string(file_size) + " bytes)");
+
+        // Verify ZIP file was created
+        if (std::filesystem::exists(zip_full_path)) {
+            auto zip_size = std::filesystem::file_size(zip_full_path);
+            log_message("Tamanho do ZIP: " + std::to_string(zip_size) + " bytes");
+        }
+
+        return true;
+
+    } catch (const std::exception& e) {
+        log_message("Erro durante a conversão: " + std::string(e.what()));
+        return false;
+    }
+}
+
+void ZipConversorWindow::log_message(const std::string& message) {
+    auto buffer = m_text_view_log.get_buffer();
+    auto iter = buffer->end();
+    buffer->insert(iter, message + "\n");
+
+    // Auto-scroll to bottom
+    auto mark = buffer->get_insert();
+    m_text_view_log.scroll_to(mark);
+
+    // Process events to update UI
+    while (Gtk::Main::events_pending()) {
+        Gtk::Main::iteration();
+    }
+}
+
+// GUI main mode from main.cpp
+int gui_main(int argc, char* argv[]) {
+    auto app = Gtk::Application::create(argc, argv, "org.zipconversor.application");
+
+    ZipConversorWindow window;
+
+    return app->run(window);
+}
