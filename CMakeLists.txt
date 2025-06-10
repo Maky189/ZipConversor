@@ -6,9 +6,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GTKMM gtkmm-3.0 REQUIRED)
-
-find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBZIP libzip)
+pkg_check_modules(LIBLZMA liblzma REQUIRED)
+pkg_check_modules(ZLIB zlib REQUIRED)
 
 if(LIBZIP_FOUND)
     message(STATUS "Using system libzip")
@@ -31,12 +31,19 @@ endif()
 
 include_directories(${GTKMM_INCLUDE_DIRS})
 include_directories(${ZIP_INCLUDE_DIRS})
+include_directories(${LIBLZMA_INCLUDE_DIRS})
 link_directories(${GTKMM_LIBRARY_DIRS})
+link_directories(${LIBLZMA_LIBRARY_DIRS})
 
 if(ZIP_LIBRARY_DIRS)
     link_directories(${ZIP_LIBRARY_DIRS})
 endif()
 add_compile_options(${GTKMM_CFLAGS_OTHER})
 add_executable(ZipConversor main.cpp gui.cpp)
-target_link_libraries(ZipConversor ${GTKMM_LIBRARIES} ${ZIP_LIBRARIES})
+target_link_libraries(ZipConversor 
+    ${GTKMM_LIBRARIES} 
+    ${ZIP_LIBRARIES}
+    ${LIBLZMA_LIBRARIES}
+    ${ZLIB_LIBRARIES}
+)
 target_compile_options(ZipConversor PRIVATE -Wno-deprecated-declarations)

@@ -27,6 +27,14 @@ protected:
     Gtk::ProgressBar m_progress_bar;
     Gtk::TextView m_text_view_log;
     Gtk::ScrolledWindow m_scrolled_window;
+    Gtk::ComboBoxText m_format_combo;
+
+    enum class ArchiveFormat {
+        ZIP,
+        TARGZ,
+        SEVENZIP
+    };
+    ArchiveFormat m_selected_format;
 
     std::string m_selected_path;
     bool m_is_folder;
@@ -35,6 +43,9 @@ protected:
     bool addFileToZip(zip_t* zip, const std::filesystem::path& file_path, const std::string& archive_path);
     bool addDirectoryToZip(zip_t* zip, const std::filesystem::path& dir_path, const std::string& base_archive_path = "");
     void log_message(const std::string& message);
+    bool convert_to_targz(const std::string& path);
+    bool convert_to_7z(const std::string& path);
+    std::string get_output_extension() const;
 };
 
 ZipConversorWindow::ZipConversorWindow()
@@ -46,7 +57,8 @@ ZipConversorWindow::ZipConversorWindow()
       m_button_select_folder("Selecionar Pasta"),
       m_button_convert("Converter para ZIP"),
       m_button_quit("Sair"),
-      m_is_folder(false)
+      m_is_folder(false),
+      m_selected_format(ArchiveFormat::ZIP)
 {
     set_title("ZipConversor - Conversor de Arquivos e Pastas para ZIP");
     set_default_size(700, 500);
@@ -65,6 +77,11 @@ ZipConversorWindow::ZipConversorWindow()
     
     m_hbox_selection.pack_start(m_button_select_file, Gtk::PACK_EXPAND_WIDGET);
     m_hbox_selection.pack_start(m_button_select_folder, Gtk::PACK_EXPAND_WIDGET);
+    m_format_combo.append("ZIP");
+    m_format_combo.append("TAR.GZ");
+    m_format_combo.append("7Z");
+    m_format_combo.set_active(0);
+    m_hbox_selection.pack_start(m_format_combo, Gtk::PACK_EXPAND_WIDGET);
     m_vbox.pack_start(m_hbox_selection, Gtk::PACK_SHRINK);
 
     m_hbox_buttons.pack_start(m_button_convert, Gtk::PACK_EXPAND_WIDGET);
@@ -85,6 +102,16 @@ ZipConversorWindow::ZipConversorWindow()
     m_button_quit.signal_clicked().connect(
         sigc::mem_fun(*this, &ZipConversorWindow::on_button_quit_clicked));
 
+    m_format_combo.signal_changed().connect([this]() {
+        std::string format = m_format_combo.get_active_text();
+        if (format == "ZIP") m_selected_format = ArchiveFormat::ZIP;
+        else if (format == "TAR.GZ") m_selected_format = ArchiveFormat::TARGZ;
+        else if (format == "7Z") m_selected_format = ArchiveFormat::SEVENZIP;
+
+        std::string button_text = "Converter para " + format;
+        m_button_convert.set_label(button_text);
+    });
+
     show_all_children();
 
     log_message("ZipConversor iniciado. Selecione um arquivo ou pasta para converter para ZIP.");
@@ -94,11 +121,9 @@ void ZipConversorWindow::on_button_select_file_clicked() {
     Gtk::FileChooserDialog dialog(*this, "Selecione um arquivo para converter para ZIP");
     dialog.set_transient_for(*this);
 
-    // Add response buttons
     dialog.add_button("_Cancelar", Gtk::RESPONSE_CANCEL);
     dialog.add_button("_Abrir", Gtk::RESPONSE_OK);
 
-    // Add filters
     auto filter_all = Gtk::FileFilter::create();
     filter_all->set_name("Todos os arquivos");
     filter_all->add_pattern("*");
@@ -125,7 +150,6 @@ void ZipConversorWindow::on_button_select_folder_clicked() {
     Gtk::FileChooserDialog dialog(*this, "Selecione uma pasta para converter para ZIP", Gtk::FILE_CHOOSER_ACTION_SELECT_FOLDER);
     dialog.set_transient_for(*this);
 
-    // Add response buttons
     dialog.add_button("_Cancelar", Gtk::RESPONSE_CANCEL);
     dialog.add_button("_Selecionar", Gtk::RESPONSE_OK);
 
@@ -153,12 +177,18 @@ void ZipConversorWindow::on_button_convert_clicked() {
     m_progress_bar.set_text("Convertendo...");
     m_progress_bar.pulse();
 
-    // Update UI
     while (Gtk::Main::events_pending()) {
         Gtk::Main::iteration();
     }
 
-    bool success = convertToZip(m_selected_path, m_is_folder);
+    bool success = false;
+    if (m_selected_format == ArchiveFormat::ZIP) {
+        success = convertToZip(m_selected_path, m_is_folder);
+    } else if (m_selected_format == ArchiveFormat::TARGZ) {
+        success = convert_to_targz(m_selected_path);
+    } else if (m_selected_format == ArchiveFormat::SEVENZIP) {
+        success = convert_to_7z(m_selected_path);
+    }
 
     m_button_convert.set_sensitive(true);
     m_button_select_file.set_sensitive(true);
@@ -221,14 +251,12 @@ bool ZipConversorWindow::addFileToZip(zip_t* zip, const std::filesystem::path& f
             return false;
         }
 
-        // Set compression method
         if (zip_set_file_compression(zip, index, ZIP_CM_DEFLATE, 9) < 0) {
             log_message("Aviso: Não foi possível definir método de compressão para: " + archive_path);
         }
 
         log_message("Adicionado: " + archive_path + " (" + std::to_string(file_size) + " bytes)");
-        
-        // Update UI periodically
+
         while (Gtk::Main::events_pending()) {
             Gtk::Main::iteration();
         }
@@ -246,8 +274,7 @@ bool ZipConversorWindow::addDirectoryToZip(zip_t* zip, const std::filesystem::pa
             if (entry.is_regular_file()) {
                 std::filesystem::path relative_path = std::filesystem::relative(entry.path(), dir_path);
                 std::string archive_path = base_archive_path.empty() ? relative_path.string() : base_archive_path + "/" + relative_path.string();
-                
-                // Convert backslashes to forward slashes for ZIP compatibility
+
                 std::replace(archive_path.begin(), archive_path.end(), '\\', '/');
                 
                 if (!addFileToZip(zip, entry.path(), archive_path)) {
@@ -259,6 +286,15 @@ bool ZipConversorWindow::addDirectoryToZip(zip_t* zip, const std::filesystem::pa
     } catch (const std::exception& e) {
         log_message("Erro ao processar diretório: " + std::string(e.what()));
         return false;
+    }
+}
+
+std::string ZipConversorWindow::get_output_extension() const {
+    switch (m_selected_format) {
+        case ArchiveFormat::ZIP: return ".zip";
+        case ArchiveFormat::TARGZ: return ".tar.gz";
+        case ArchiveFormat::SEVENZIP: return ".7z";
+        default: return ".zip";
     }
 }
 
@@ -333,8 +369,7 @@ bool ZipConversorWindow::convertToZip(const std::string& path, bool is_folder) {
 
         if (success) {
             log_message("Arquivo ZIP criado com sucesso: " + zip_full_path.string());
-            
-            // Verify ZIP file was created
+
             if (std::filesystem::exists(zip_full_path)) {
                 auto zip_size = std::filesystem::file_size(zip_full_path);
                 log_message("Tamanho do ZIP: " + std::to_string(zip_size) + " bytes");
@@ -349,22 +384,93 @@ bool ZipConversorWindow::convertToZip(const std::string& path, bool is_folder) {
     }
 }
 
+bool ZipConversorWindow::convert_to_targz(const std::string& path) {
+    try {
+        std::filesystem::path input_path(path);
+        std::string output_filename = input_path.filename().string() + ".tar.gz";
+        std::filesystem::path output_path = input_path.parent_path() / output_filename;
+
+        // Create tar command
+        std::string tar_cmd;
+        if (std::filesystem::is_directory(input_path)) {
+            tar_cmd = "tar -czf '" + output_path.string() + "' -C '" +
+                     input_path.parent_path().string() + "' '" +
+                     input_path.filename().string() + "'";
+        } else {
+            tar_cmd = "tar -czf '" + output_path.string() + "' -C '" +
+                     input_path.parent_path().string() + "' '" +
+                     input_path.filename().string() + "'";
+        }
+
+        log_message("Criando arquivo TAR.GZ...");
+        int result = system(tar_cmd.c_str());
+
+        if (result == 0) {
+            log_message("Arquivo TAR.GZ criado com sucesso: " + output_path.string());
+            if (std::filesystem::exists(output_path)) {
+                auto size = std::filesystem::file_size(output_path);
+                log_message("Tamanho do TAR.GZ: " + std::to_string(size) + " bytes");
+            }
+            return true;
+        } else {
+            log_message("Erro ao criar arquivo TAR.GZ");
+            return false;
+        }
+    } catch (const std::exception& e) {
+        log_message("Erro durante a criação do TAR.GZ: " + std::string(e.what()));
+        return false;
+    }
+}
+
+bool ZipConversorWindow::convert_to_7z(const std::string& path) {
+    try {
+        std::filesystem::path input_path(path);
+        std::string output_filename = input_path.filename().string() + ".7z";
+        std::filesystem::path output_path = input_path.parent_path() / output_filename;
+
+        // Create 7z command
+        std::string sevenzip_cmd;
+        if (std::filesystem::is_directory(input_path)) {
+            sevenzip_cmd = "7z a -t7z '" + output_path.string() + "' '" +
+                          input_path.string() + "/*'";
+        } else {
+            sevenzip_cmd = "7z a -t7z '" + output_path.string() + "' '" +
+                          input_path.string() + "'";
+        }
+
+        log_message("Criando arquivo 7Z...");
+        int result = system(sevenzip_cmd.c_str());
+
+        if (result == 0) {
+            log_message("Arquivo 7Z criado com sucesso: " + output_path.string());
+            if (std::filesystem::exists(output_path)) {
+                auto size = std::filesystem::file_size(output_path);
+                log_message("Tamanho do 7Z: " + std::to_string(size) + " bytes");
+            }
+            return true;
+        } else {
+            log_message("Erro ao criar arquivo 7Z");
+            return false;
+        }
+    } catch (const std::exception& e) {
+        log_message("Erro durante a criação do 7Z: " + std::string(e.what()));
+        return false;
+    }
+}
+
 void ZipConversorWindow::log_message(const std::string& message) {
     auto buffer = m_text_view_log.get_buffer();
     auto iter = buffer->end();
     buffer->insert(iter, message + "\n");
 
-    // Auto-scroll to bottom
     auto mark = buffer->get_insert();
     m_text_view_log.scroll_to(mark);
 
-    // Process events to update UI
     while (Gtk::Main::events_pending()) {
         Gtk::Main::iteration();
     }
 }
 
-// GUI main mode from main.cpp
 int gui_main(int argc, char* argv[]) {
     auto app = Gtk::Application::create(argc, argv, "org.zipconversor.application");
 
