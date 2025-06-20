@@ -101,9 +101,49 @@ Follow the prompts to:
 - Great for preserving Linux file attributes
 - Common format for Linux systems
 
-## Contributing
+## Technologies and Tools Used
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+- C++ as the main development language
+- GTK3 for graphical interface
+- libzip for ZIP file manipulation
+- p7zip-full for 7Z compression
+- CMake as build system
+- pkg-config for dependency management
+- System libraries for compression (gzip, tar)
+
+## Development Stages
+
+1. **CLI Mode Implementation**
+   - Initial development of basic compression functionality
+   - Implementation of support for different formats (ZIP, 7Z, TAR.GZ)
+   - Testing with different file types and sizes
+
+2. **Graphical Interface Development**
+   - GTK3 integration for a user-friendly interface
+   - Implementation of file selection via GUI
+   - Addition of visual feedback during compression
+
+## Theoretical Concepts Application
+
+- **Data Compression**: Utilization of different compression algorithms for each supported format
+- **File Handling**: Binary data reading and writing in C++
+- **Object-Oriented Programming**: Code structuring using classes and objects
+- **Graphical Interface**: Application of events and widgets concepts for a responsive GUI
+- **Memory Management**: Careful handling of resource allocation and deallocation
+
+## Results and Challenges
+
+### Results
+- Successful implementation of a cross-platform file converter
+- Support for multiple compression formats (ZIP, 7Z, TAR.GZ)
+- Functional and intuitive graphical interface
+- Preservation of directory structure and file attributes
+
+### Challenges Encountered
+- Difficulties with C++ syntax, especially in more advanced aspects of the language
+- Memory limitations when processing very large files, as the entire file needs to be loaded into memory
+- Initial integration with compression libraries
+- Development environment setup with all necessary dependencies
 
 ### Common Issues
 
